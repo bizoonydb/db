@@ -1,9 +1,7 @@
 name: Mover arquivos de hoje
 
 on:
-  workflow_dispatch: # permite rodar manualmente
-  schedule:
-    - cron: "0 9 * * *" # executa todo dia às 09:00 UTC (~06h no Brasil)
+  workflow_dispatch: # executa manualmente no painel Actions
 
 jobs:
   mover-hoje:
@@ -19,8 +17,7 @@ jobs:
       - name: Mover arquivos modificados hoje
         run: |
           echo "Verificando arquivos modificados hoje..."
-          # Encontra arquivos alterados ou criados nas últimas 24h (considerando fuso de UTC)
-          arquivos=$(find db/pda -maxdepth 1 -type f -mtime -1)
+          arquivos=$(find db/pda -maxdepth 1 -type f -mtime -1 -name "*.pdf")
           if [ -z "$arquivos" ]; then
             echo "Nenhum arquivo novo hoje."
             exit 0
