@@ -1,73 +1,32 @@
 name: Mover arquivos de hoje
 
-# garante token com permissão de escrita para conteúdo (push)
-permissions:
-  contents: write
-
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 👈 só executa quando você clicar em “Run workflow”
 
 jobs:
   mover-hoje:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - name: Clonar repositório (com credenciais para push)
+      - name: Clonar repositório
         uses: actions/checkout@v4
         with:
-          persist-credentials: true   # importante para permitir git push com GITHUB_TOKEN
-          fetch-depth: 0
-
-      - name: Mostrar usuário e token (debug)
-        run: |
-          echo "GITHUB_ACTOR=$GITHUB_ACTOR"
-          # mostrar se o token existe (não o conteúdo)
-          if [ -z "${{ secrets.GITHUB_TOKEN }}" ]; then
-            echo "GITHUB_TOKEN vazio"
-          else
-            echo "GITHUB_TOKEN definido"
-          fi
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Criar pasta HJ se não existir
         run: mkdir -p db/pda/HJ
 
-      - name: Listar arquivos antes (debug)
-        run: ls -la db/pda || true
-
-      - name: Mover arquivos PDF modificados nas últimas 24h
-        id: mover
+      - name: Mover arquivos modificados hoje
         run: |
-          echo "Procurando PDFs modificados nas últimas 24h..."
-          arquivos=$(find db/pda -maxdepth 1 -type f -mtime -1 -name "*.pdf" -print)
-          if [ -z "$arquivos" ]; then
-            echo "::set-output name=moved::0"
-            echo "Nenhum PDF novo hoje."
-            exit 0
-          fi
-          echo "Arquivos encontrados:"
-          echo "$arquivos"
-          for f in $arquivos; do
-            echo "Movendo: $f -> db/pda/HJ/"
-            mv "$f" db/pda/HJ/
-          done
-          echo "::set-output name=moved::1"
+          find db/pda -maxdepth 1 -type f -daystart -mtime 0 -exec mv {} db/pda/HJ/ \;
 
-      - name: Mostrar pasta HJ (debug)
-        run: ls -la db/pda/HJ || true
-
-      - name: Preparar commit (só se mudou algo)
-        if: steps.mover.outputs.moved == '1'
+      - name: Commit e push das mudanças
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add -A
-          echo "Status antes do commit:"
-          git status --porcelain
-          git commit -m "Mover arquivos de hoje para HJ [automático]" || (echo "Nada para commitar" && exit 0)
-          echo "Tentando push para ${GITHUB_REF##*/}..."
-          git push origin HEAD:${GITHUB_REF##*/}
-
-      - name: Mensagem se nada foi movido
-        if: steps.mover.outputs.moved == '0'
-        run: echo "Fluxo encerrado: nenhum arquivo movido."
-
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add .
+          git commit -m "Mover arquivos de hoje para HJ [automático]" || echo "Sem alterações"
+          git pull --rebase origin main || true
+          git push origin main || true
