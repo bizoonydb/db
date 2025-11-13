@@ -1,0 +1,55 @@
+name: Process PDFs in Batches
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Count PDFs and create matrix
+        id: set-matrix
+        run: |
+          # Conta todos os PDFs na pasta ./pda
+          total=$(ls ./pda/*.pdf | wc -l)
+          batch_size=700
+          
+          # Calcula número de batches
+          num_batches=$(( (total + batch_size - 1) / batch_size ))
+
+          # Cria JSON para matriz
+          matrix_json="{\"batch\":["
+          for ((i=1;i<=num_batches;i++)); do
+            matrix_json+="$i"
+            if [ $i -lt $num_batches ]; then
+              matrix_json+=","
+            fi
+          done
+          matrix_json+="]}"
+          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+
+  process-batch:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{fromJson(needs.prepare-matrix.outputs.matrix)}}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Process PDFs
+        run: |
+          files=($(ls ./pda/*.pdf))
+          batch_size=700
+          start=$(( (matrix.batch - 1) * batch_size ))
+          end=$(( start + batch_size - 1 ))
+          batch_files=("${files[@]:$start:$batch_size}")
+          
+          echo "Processando batch #${matrix.batch} com ${#batch_files[@]} PDFs"
+          for pdf in "${batch_files[@]}"; do
+            echo " -> $pdf"
+            # Aqui você chama seu build ou script para processar o PDF
+            # Ex: node build.js "$pdf"
+          done
