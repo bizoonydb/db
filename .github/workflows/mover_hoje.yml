@@ -1,10 +1,10 @@
-name: Mover PDFs enviados nas últimas 10h
+name: Mover últimos 96 PDFs
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 👈 executa manualmente no botão “Run workflow”
 
 jobs:
-  mover-pdfs:
+  mover-ultimos-96:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -13,37 +13,38 @@ jobs:
       - name: Clonar repositório
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Criar pasta HJ se não existir
         run: mkdir -p db/pda/HJ
 
-      - name: Listar PDFs commitados nas últimas 10h
-        id: listar
+      - name: Listar e mover os últimos 96 PDFs
         run: |
-          arquivos=$(git log --since="10 hours ago" --name-only --pretty=format: | grep '^db/pda/.*\.pdf$' | sort | uniq || true)
-          echo "Arquivos detectados:"
-          echo "$arquivos"
-          echo "arquivos<<EOF" >> $GITHUB_OUTPUT
-          echo "$arquivos" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "🔍 Buscando os 96 PDFs mais recentes no repositório..."
 
-      - name: Mover arquivos detectados
-        run: |
-          if [ -n "${{ steps.listar.outputs.arquivos }}" ]; then
-            echo "${{ steps.listar.outputs.arquivos }}" | while read -r arq; do
-              [ -f "$arq" ] && mv "$arq" db/pda/HJ/ && echo "📦 Movido: $arq"
-            done
-          else
-            echo "⚠️ Nenhum PDF foi commitado nas últimas 10h."
+          # Lista os 96 PDFs mais recentemente adicionados (por commit)
+          ultimos=$(git log --diff-filter=A --name-only --pretty=format: | grep '^db/pda/.*\.pdf$' | sort | uniq | tail -n 96)
+
+          echo "Arquivos detectados:"
+          echo "$ultimos"
+
+          if [ -z "$ultimos" ]; then
+            echo "⚠️ Nenhum PDF encontrado."
+            exit 0
           fi
+
+          for arq in $ultimos; do
+            if [ -f "$arq" ]; then
+              echo "➡️ Movendo $arq para db/pda/HJ/"
+              mv "$arq" db/pda/HJ/
+            fi
+          done
 
       - name: Commit e push das mudanças
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add .
-          git commit -m "Mover PDFs das últimas 10h para HJ [automático]" || echo "Sem alterações"
+          git commit -m "Mover últimos 96 PDFs para HJ [automático]" || echo "Sem alterações"
           git pull --rebase origin main || true
           git push origin main || true
