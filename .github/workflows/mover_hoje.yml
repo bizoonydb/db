@@ -1,7 +1,7 @@
-name: Mover arquivos de hoje
+name: Mover arquivos das últimas 10h
 
 on:
-  workflow_dispatch:  # 👈 só executa quando você clicar em “Run workflow”
+  workflow_dispatch:  # 👈 executa manualmente quando você clicar em “Run workflow”
 
 jobs:
   mover-hoje:
@@ -18,15 +18,14 @@ jobs:
       - name: Criar pasta HJ se não existir
         run: mkdir -p db/pda/HJ
 
-      - name: Mover arquivos modificados hoje
-        run: |
-          find db/pda -maxdepth 1 -type f -daystart -mtime 0 -exec mv {} db/pda/HJ/ \;
+      - name: Mover arquivos modificados nas últimas 10h
+        run: find db/pda -maxdepth 1 -type f -mmin -600 -exec mv {} db/pda/HJ/ \;
 
       - name: Commit e push das mudanças
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add .
-          git commit -m "Mover arquivos de hoje para HJ [automático]" || echo "Sem alterações"
+          git commit -m "Mover arquivos das últimas 10h para HJ [automático]" || echo "Sem alterações"
           git pull --rebase origin main || true
           git push origin main || true
