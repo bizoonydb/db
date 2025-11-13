@@ -1,7 +1,7 @@
 name: Mover arquivos das últimas 10h
 
 on:
-  workflow_dispatch:  # 👈 executa manualmente quando você clicar em “Run workflow”
+  workflow_dispatch:  # Executa manualmente
 
 jobs:
   mover-hoje:
@@ -18,9 +18,43 @@ jobs:
       - name: Criar pasta HJ se não existir
         run: mkdir -p db/pda/HJ
 
-      - name: Mover arquivos modificados nas últimas 10h
-        run: find db/pda -maxdepth 1 -type f -mmin -600 -exec mv {} db/pda/HJ/ \;
+      # 1️⃣ Detectar por commits recentes
+      - name: Detectar arquivos alterados nos últimos commits (10h)
+        id: recent_commits
+        run: |
+          arquivos_commit=$(git log --since="10 hours ago" --name-only --pretty=format: | grep '^db/pda/' | sort | uniq || true)
+          echo "Arquivos encontrados por commit:"
+          echo "$arquivos_commit"
+          echo "arquivos_commit<<EOF" >> $GITHUB_OUTPUT
+          echo "$arquivos_commit" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
+      # 2️⃣ Detectar por hora de modificação local
+      - name: Detectar arquivos modificados localmente nas últimas 10h
+        id: recent_files
+        run: |
+          arquivos_mod=$(find db/pda -maxdepth 1 -type f -mmin -600 || true)
+          echo "Arquivos encontrados por mtime:"
+          echo "$arquivos_mod"
+          echo "arquivos_mod<<EOF" >> $GITHUB_OUTPUT
+          echo "$arquivos_mod" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # 3️⃣ Juntar os dois conjuntos e mover
+      - name: Mover arquivos detectados
+        run: |
+          arquivos_total=$(echo "${{ steps.recent_commits.outputs.arquivos_commit }}" "${{ steps.recent_files.outputs.arquivos_mod }}" | tr ' ' '\n' | sort | uniq)
+          echo "Arquivos a mover:"
+          echo "$arquivos_total"
+          if [ -n "$arquivos_total" ]; then
+            echo "$arquivos_total" | while read -r arq; do
+              [ -f "$arq" ] && mv "$arq" db/pda/HJ/
+            done
+          else
+            echo "Nenhum arquivo encontrado nas últimas 10h"
+          fi
+
+      # 4️⃣ Commit e push das mudanças
       - name: Commit e push das mudanças
         run: |
           git config --global user.name "github-actions"
