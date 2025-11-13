@@ -1,0 +1,26 @@
+name: Mover arquivos de hoje
+
+on:
+  workflow_dispatch: # permite rodar manualmente no painel Actions
+  schedule:
+    - cron: "0 9 * * *"  # executa todo dia às 09:00 UTC (~06h horário de Brasília)
+
+jobs:
+  mover-hoje:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositório
+        uses: actions/checkout@v4
+
+      - name: Mover arquivos de hoje para HJ
+        run: |
+          mkdir -p db/pda/HJ
+          find db/pda -maxdepth 1 -type f -daystart -mtime 0 -exec mv {} db/pda/HJ/ \;
+
+      - name: Commit e push das mudanças
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add .
+          git commit -m "Mover arquivos de hoje para HJ [automático]" || echo "Sem arquivos novos"
+          git push
