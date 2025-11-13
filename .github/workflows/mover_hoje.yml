@@ -1,7 +1,7 @@
 name: Mover últimos 96 PDFs
 
 on:
-  workflow_dispatch:  # 👈 executa manualmente no botão “Run workflow”
+  workflow_dispatch:  # executa manualmente pelo botão “Run workflow”
 
 jobs:
   mover-ultimos-96:
@@ -18,12 +18,12 @@ jobs:
       - name: Criar pasta HJ se não existir
         run: mkdir -p db/pda/HJ
 
-      - name: Listar e mover os últimos 96 PDFs
+      - name: Mover os 96 PDFs mais recentes (por data real de modificação)
         run: |
-          echo "🔍 Buscando os 96 PDFs mais recentes no repositório..."
+          echo "🔍 Buscando os 96 PDFs mais recentes na pasta db/pda..."
 
-          # Lista os 96 PDFs mais recentemente adicionados (por commit)
-          ultimos=$(git log --diff-filter=A --name-only --pretty=format: | grep '^db/pda/.*\.pdf$' | sort | uniq | tail -n 96)
+          # Lista os 96 PDFs mais recentes por data real
+          ultimos=$(find db/pda -maxdepth 1 -type f -name "*.pdf" -printf "%T@ %p\n" | sort -n | tail -n 96 | awk '{print $2}')
 
           echo "Arquivos detectados:"
           echo "$ultimos"
