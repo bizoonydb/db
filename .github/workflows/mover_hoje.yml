@@ -1,10 +1,10 @@
-name: Mover arquivos das últimas 10h
+name: Mover PDFs enviados nas últimas 10h
 
 on:
-  workflow_dispatch:  # Executa manualmente
+  workflow_dispatch:
 
 jobs:
-  mover-hoje:
+  mover-pdfs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -13,53 +13,37 @@ jobs:
       - name: Clonar repositório
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Criar pasta HJ se não existir
         run: mkdir -p db/pda/HJ
 
-      # 1️⃣ Detectar por commits recentes
-      - name: Detectar arquivos alterados nos últimos commits (10h)
-        id: recent_commits
+      - name: Listar PDFs commitados nas últimas 10h
+        id: listar
         run: |
-          arquivos_commit=$(git log --since="10 hours ago" --name-only --pretty=format: | grep '^db/pda/' | sort | uniq || true)
-          echo "Arquivos encontrados por commit:"
-          echo "$arquivos_commit"
-          echo "arquivos_commit<<EOF" >> $GITHUB_OUTPUT
-          echo "$arquivos_commit" >> $GITHUB_OUTPUT
+          arquivos=$(git log --since="10 hours ago" --name-only --pretty=format: | grep '^db/pda/.*\.pdf$' | sort | uniq || true)
+          echo "Arquivos detectados:"
+          echo "$arquivos"
+          echo "arquivos<<EOF" >> $GITHUB_OUTPUT
+          echo "$arquivos" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      # 2️⃣ Detectar por hora de modificação local
-      - name: Detectar arquivos modificados localmente nas últimas 10h
-        id: recent_files
-        run: |
-          arquivos_mod=$(find db/pda -maxdepth 1 -type f -mmin -600 || true)
-          echo "Arquivos encontrados por mtime:"
-          echo "$arquivos_mod"
-          echo "arquivos_mod<<EOF" >> $GITHUB_OUTPUT
-          echo "$arquivos_mod" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      # 3️⃣ Juntar os dois conjuntos e mover
       - name: Mover arquivos detectados
         run: |
-          arquivos_total=$(echo "${{ steps.recent_commits.outputs.arquivos_commit }}" "${{ steps.recent_files.outputs.arquivos_mod }}" | tr ' ' '\n' | sort | uniq)
-          echo "Arquivos a mover:"
-          echo "$arquivos_total"
-          if [ -n "$arquivos_total" ]; then
-            echo "$arquivos_total" | while read -r arq; do
-              [ -f "$arq" ] && mv "$arq" db/pda/HJ/
+          if [ -n "${{ steps.listar.outputs.arquivos }}" ]; then
+            echo "${{ steps.listar.outputs.arquivos }}" | while read -r arq; do
+              [ -f "$arq" ] && mv "$arq" db/pda/HJ/ && echo "📦 Movido: $arq"
             done
           else
-            echo "Nenhum arquivo encontrado nas últimas 10h"
+            echo "⚠️ Nenhum PDF foi commitado nas últimas 10h."
           fi
 
-      # 4️⃣ Commit e push das mudanças
       - name: Commit e push das mudanças
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add .
-          git commit -m "Mover arquivos das últimas 10h para HJ [automático]" || echo "Sem alterações"
+          git commit -m "Mover PDFs das últimas 10h para HJ [automático]" || echo "Sem alterações"
           git pull --rebase origin main || true
           git push origin main || true
