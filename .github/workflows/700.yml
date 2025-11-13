@@ -1,7 +1,7 @@
 name: Process PDFs in Batches
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Permite disparar manualmente
 
 jobs:
   prepare-matrix:
@@ -16,7 +16,7 @@ jobs:
         run: |
           # Conta todos os PDFs na pasta ./pda
           total=$(ls ./pda/*.pdf | wc -l)
-          batch_size=700
+          batch_size=300
           
           # Calcula número de batches
           num_batches=$(( (total + batch_size - 1) / batch_size ))
@@ -39,17 +39,28 @@ jobs:
       matrix: ${{fromJson(needs.prepare-matrix.outputs.matrix)}}
     steps:
       - uses: actions/checkout@v3
-      - name: Process PDFs
+
+      - name: Process PDFs in batch
         run: |
           files=($(ls ./pda/*.pdf))
-          batch_size=700
+          batch_size=300
           start=$(( (matrix.batch - 1) * batch_size ))
-          end=$(( start + batch_size - 1 ))
           batch_files=("${files[@]:$start:$batch_size}")
-          
-          echo "Processando batch #${matrix.batch} com ${#batch_files[@]} PDFs"
+
+          echo "Processing batch #${matrix.batch} with ${#batch_files[@]} PDFs"
+
+          mkdir -p ./processed_batch_${matrix.batch}
+
           for pdf in "${batch_files[@]}"; do
             echo " -> $pdf"
-            # Aqui você chama seu build ou script para processar o PDF
-            # Ex: node build.js "$pdf"
+            # Aqui você chama seu script de build, ex:
+            # node build.js "$pdf"
+            # ou qualquer processamento que você faça
+            cp "$pdf" "./processed_batch_${matrix.batch}/"  # Exemplo de "processamento"
           done
+
+      - name: Upload processed batch as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: processed-batch-${{ matrix.batch }}
+          path: ./processed_batch_${{ matrix.batch }}
