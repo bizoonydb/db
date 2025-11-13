@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Baixar PDFs por Pasta/Subpasta (ZIP)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 20px; background:#f6f7fb; color:#111; }
+  h1 { margin: 0 0 10px 0; font-size: 20px; }
+  .grid { display:flex; gap:16px; align-items:flex-start; }
+  textarea { width: 700px; height: 260px; padding:10px; border-radius:8px; border:1px solid #ddd; resize:vertical; font-family:monospace; background:#fff; }
+  .controls { min-width:300px; }
+  button { display:block; width:100%; padding:10px; margin-bottom:8px; border-radius:8px; border:0; cursor:pointer; font-weight:600; }
+  button.primary { background:#2563eb; color:white; }
+  button.ghost { background:#fff; border:1px solid #cbd5e1; color:#111; }
+  .log { background:#fff; border:1px solid #e6e9f2; padding:10px; border-radius:8px; min-height:120px; max-height:320px; overflow:auto; }
+  .tree { background:#fff; border:1px solid #e6e9f2; padding:10px; border-radius:8px; max-height:320px; overflow:auto; font-size:13px; }
+  .folder { margin-left:8px; }
+  .file { color:#0645ad; text-decoration:none; font-style:normal; }
+  .progressBar { height:12px; background:#fff; border:1px solid #e0e6f6; border-radius:999px; overflow:hidden; }
+  .progress { height:100%; width:0%; background:linear-gradient(90deg,#34d399,#06b6d4); }
+  .small { font-size:12px; color:#555; }
+  .error { color:#b91c1c; font-weight:600; }
+</style>
+</head>
+<body>
+  <h1><i class="fa-solid fa-download"></i> Baixar todos os PDFs (mantendo pastas e subpastas)</h1>
+  <p class="small">Cole aqui o bloco HTML (com &lt;details&gt; / &lt;summary&gt; / &lt;a data-url="..."/&gt;). O sistema criará um ZIP com a mesma hierarquia.</p>
+
+  <div class="grid">
+    <textarea id="inputHtml" placeholder="Cole aqui o HTML... Ex: &lt;details&gt;&lt;summary&gt;MOTOROLA&lt;/summary&gt;..."></textarea>
+
+    <div class="controls">
+      <button id="parseBtn" class="primary">Analisar e Pré-visualizar</button>
+      <button id="downloadBtn" class="ghost" disabled>Baixar todos (ZIP)</button>
+      <button id="clearBtn" class="ghost">Limpar</button>
+
+      <div style="height:12px"></div>
+
+      <div class="log" id="log">
+        <div class="small">Logs aparecerão aqui...</div>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div class="small">Progresso global</div>
+      <div class="progressBar" style="margin-top:6px;">
+        <div id="globalProgress" class="progress"></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:18px">Árvore detectada</h3>
+  <div id="tree" class="tree"><span class="small">Nenhuma árvore carregada.</span></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+<script>
+(function(){
+  const input = document.getElementById('inputHtml');
+  const parseBtn = document.getElementById('parseBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const logEl = document.getElementById('log');
+  const treeEl = document.getElementById('tree');
+  const progressEl = document.getElementById('globalProgress');
+
+  let filesList = []; // { url, path, filename, title }
+
+  function log(msg, isError=false) {
+    const d = document.createElement('div');
+    d.innerHTML = (isError?'<span class="error">ERROR</span> ':'') + msg;
+    logEl.prepend(d);
+  }
+
+  function clearLog(){
+    logEl.innerHTML = '<div class="small">Logs aparecerão aqui...</div>';
+  }
+
+  function parseHtmlFragment(htmlText) {
+    // Use DOMParser to create elements
+    const parser = new DOMParser();
+    // wrap in a container to keep structure
+    const doc = parser.parseFromString(`<div id="root_wrapper">${htmlText}</div>`, 'text/html');
+    const wrapper = doc.getElementById('root_wrapper');
+
+    // find all anchors with data-url
+    const anchors = wrapper.querySelectorAll('a[data-url]');
+    const out = [];
+    anchors.forEach(a => {
+      const url = a.getAttribute('data-url')?.trim();
+      if (!url) return;
+      // compute path from parent <details> <summary> chain
+      let pathParts = [];
+      let node = a.parentElement;
+      // climb up until wrapper
+      while (node && node !== wrapper) {
+        if (node.tagName && node.tagName.toLowerCase() === 'details') {
+          // find immediate child summary text
+          const summary = node.querySelector(':scope > summary');
+          if (summary) {
+            const t = summary.textContent.trim();
+            if (t) pathParts.push(sanitizeName(t));
+          }
+        }
+        node = node.parentElement;
+      }
+      pathParts = pathParts.reverse(); // from root to leaf
+      // determine filename: prefer last segment of URL, fallback to anchor text
+      let filename = url.split('/').pop().split('?')[0] || '';
+      if (!/\.pdf$/i.test(filename)) {
+        // try anchor text
+        const txt = a.textContent.trim();
+        filename = (txt ? sanitizeName(txt) : 'file') + '.pdf';
+      }
+      // remove any leading slashes
+      if (filename.startsWith('/')) filename = filename.slice(1);
+      // assemble path
+      const folderPath = pathParts.join('/');
+      out.push({
+        url,
+        path: folderPath, // may be ''
+        filename,
+        title: a.textContent.trim()
+      });
+    });
+    return out;
+  }
+
+  function sanitizeName(s) {
+    // remove illegal filename chars and trim
+    return s.replace(/[<>:"/\\|?*]+/g, '').replace(/\s+/g,' ').trim();
+  }
+
+  function renderTree(list) {
+    if (!list || list.length === 0) {
+      treeEl.innerHTML = '<span class="small">Nenhuma árvore carregada.</span>';
+      return;
+    }
+    // build a nested object
+    const root = {};
+    list.forEach(f => {
+      const path = f.path ? f.path.split('/').filter(Boolean) : [];
+      let node = root;
+      path.forEach(p => {
+        node[p] = node[p] || { __folders: {}, __files: [] };
+        node = node[p].__folders;
+      });
+      // At the final level, push file
+      // We need to find the object that holds __files
+      let holder = root;
+      for (let i=0;i<path.length;i++){
+        const key = path[i];
+        holder = holder[key].__folders;
+      }
+      // create a folder object reference to add file: navigate differently:
+      let folderObj = { __folders: root, __files: [] }; // dummy
+      // We'll instead build with simpler approach below
+    });
+
+    // Simpler: build map of folder->files
+    const map = {};
+    list.forEach(f=>{
+      const folder = f.path || '';
+      map[folder] = map[folder] || [];
+      map[folder].push(f);
+    });
+
+    // Convert map into nested HTML by sorting folder keys by depth
+    const folders = Object.keys(map).sort((a,b)=> a.split('/').length - b.split('/').length);
+    const container = document.createElement('div');
+    folders.forEach(folder=>{
+      const level = folder === '' ? 0 : folder.split('/').length;
+      const folderName = folder === '' ? 'RAIZ' : folder;
+      const folderDiv = document.createElement('div');
+      folderDiv.style.marginLeft = (level*8) + 'px';
+      folderDiv.innerHTML = `<strong>${folderName}</strong>`;
+      map[folder].forEach(f=>{
+        const a = document.createElement('a');
+        a.className = 'file';
+        a.href = f.url;
+        a.target = '_blank';
+        a.textContent = ' ' + f.filename;
+        const info = document.createElement('div');
+        info.style.marginLeft = (level*8 + 12) + 'px';
+        info.appendChild(a);
+        folderDiv.appendChild(info);
+      });
+      container.appendChild(folderDiv);
+    });
+
+    treeEl.innerHTML = '';
+    treeEl.appendChild(container);
+  }
+
+  parseBtn.addEventListener('click', ()=>{
+    clearLog();
+    progressEl.style.width = '0%';
+    filesList = [];
+    const html = input.value.trim();
+    if (!html) { log('Cole algum HTML antes de analisar.', true); return; }
+    try {
+      filesList = parseHtmlFragment(html);
+      if (filesList.length === 0) {
+        log('Nenhum link com data-url encontrado.', true);
+        treeEl.innerHTML = '<span class="small">Nenhum link detectado.</span>';
+        downloadBtn.disabled = true;
+        return;
+      }
+      log(`Foram detectados ${filesList.length} arquivos. Preparando árvore...`);
+      renderTree(filesList);
+      downloadBtn.disabled = false;
+    } catch (err) {
+      console.error(err);
+      log('Erro ao analisar HTML: ' + err.message, true);
+    }
+  });
+
+  clearBtn.addEventListener('click', ()=>{
+    input.value = '';
+    filesList = [];
+    treeEl.innerHTML = '<span class="small">Nenhuma árvore carregada.</span>';
+    downloadBtn.disabled = true;
+    clearLog();
+  });
+
+  downloadBtn.addEventListener('click', async ()=>{
+    if (!filesList || filesList.length === 0) { log('Nada para baixar.', true); return; }
+    downloadBtn.disabled = true;
+    parseBtn.disabled = true;
+    clearLog();
+
+    const zip = new JSZip();
+    const total = filesList.length;
+    let completed = 0;
+    const concurrency = 4; // paralelismo
+    let idx = 0;
+
+    log(`Iniciando download de ${total} arquivo(s) - isso usa fetch() para cada URL.`);
+
+    async function worker() {
+      while (true) {
+        let item;
+        // simple index locking
+        if (idx >= total) break;
+        item = filesList[idx++];
+        try {
+          log(`Baixando: ${item.url}`);
+          // Try fetching as blob
+          const resp = await fetch(item.url, { method: 'GET', mode: 'cors' });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+          const blob = await resp.blob();
+          // add to zip at path
+          const fullPath = (item.path ? item.path + '/' : '') + item.filename;
+          zip.file(fullPath, blob);
+          log(`Adicionado ao ZIP: ${fullPath}`);
+        } catch (err) {
+          log(`Falha ao baixar ${item.url} — ${err.message}`, true);
+        }
+        completed++;
+        const pct = Math.round((completed/total)*100);
+        progressEl.style.width = pct + '%';
+      }
+    }
+
+    // start workers
+    const workers = [];
+    for (let i=0;i<concurrency;i++) workers.push(worker());
+    await Promise.all(workers);
+
+    log('Compactando ZIP...');
+    try {
+      const content = await zip.generateAsync({type:"blob"}, (meta)=>{
+        // opcional: atualizar progresso de compressão
+        progressEl.style.width = (90 + Math.round(meta.percent/10)) + '%';
+      });
+      saveAs(content, 'arquivos_pasta.zip');
+      progressEl.style.width = '100%';
+      log('ZIP gerado e download iniciado.');
+    } catch (err) {
+      log('Erro ao gerar ZIP: ' + err.message, true);
+    } finally {
+      downloadBtn.disabled = false;
+      parseBtn.disabled = false;
+    }
+  });
+
+  // Allow Ctrl+V to paste HTML directly (just standard paste works to textarea)
+  // Optionally: drag & drop of an .html file
+  input.addEventListener('dragover', (e)=>{ e.preventDefault(); input.style.border = '1px solid #7dd3fc'; });
+  input.addEventListener('dragleave', (e)=>{ input.style.border = ''; });
+  input.addEventListener('drop', (e)=>{
+    e.preventDefault();
+    input.style.border = '';
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) {
+      const reader = new FileReader();
+      reader.onload = () => { input.value = reader.result; };
+      reader.readAsText(f);
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
