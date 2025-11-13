@@ -46,7 +46,7 @@ jobs:
       - name: Process PDFs in batch
         run: |
           files=($(ls ./pda/*.pdf | sort))
-          batch_size=300
+          batch_size=100
           start=$(( (matrix.batch - 1) * batch_size ))
           batch_files=("${files[@]:$start:$batch_size}")
 
